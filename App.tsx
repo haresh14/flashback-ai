@@ -2,14 +2,66 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import React, { useState, ChangeEvent, useRef, useEffect } from 'react';
+import React, { useState, ChangeEvent, useRef, useEffect, Component, ReactNode, ErrorInfo } from 'react';
 import { motion } from 'framer-motion';
 import { generateDecadeImage } from './services/geminiService';
 import PolaroidCard from './components/PolaroidCard';
 import ImageModal from './components/ImageModal';
+import HistorySidebar, { HistoryItem } from './components/HistorySidebar';
 import { createAlbumPage } from './lib/albumUtils';
 import { cn } from './lib/utils';
+import { dbService } from './services/dbService';
 import Footer from './components/Footer';
+import { Clock, AlertCircle } from 'lucide-react';
+
+// Error Boundary Component
+interface ErrorBoundaryProps {
+    children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+    hasError: boolean;
+    error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+    public state: ErrorBoundaryState;
+    public props: ErrorBoundaryProps;
+
+    constructor(props: ErrorBoundaryProps) {
+        super(props);
+        this.state = { hasError: false, error: null };
+    }
+
+    static getDerivedStateFromError(error: Error) {
+        return { hasError: true, error };
+    }
+
+    componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+        console.error("ErrorBoundary caught an error", error, errorInfo);
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div className="min-h-screen bg-black flex flex-col items-center justify-center p-6 text-center">
+                    <AlertCircle className="text-red-500 mb-4" size={48} />
+                    <h2 className="text-2xl font-permanent-marker text-white mb-2">Something went wrong</h2>
+                    <p className="text-neutral-400 font-mono text-sm max-w-md mb-6">
+                        {this.state.error?.message || "An unexpected error occurred."}
+                    </p>
+                    <button 
+                        onClick={() => window.location.reload()}
+                        className="font-permanent-marker text-black bg-yellow-400 py-2 px-6 rounded-sm hover:bg-yellow-300 transition-colors"
+                    >
+                        Reload App
+                    </button>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
 
 const DECADES = [
     '1950s', '1960s', '1970s', '1980s', '1990s', '2000s', 
@@ -69,9 +121,68 @@ function App() {
     const [appState, setAppState] = useState<'idle' | 'image-uploaded' | 'generating' | 'results-shown'>('idle');
     const [selectedDecades, setSelectedDecades] = useState<string[]>(['1950s', '1960s', '1970s', '1980s', '1990s', '2000s']);
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
+    const [history, setHistory] = useState<HistoryItem[]>([]);
+    const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+    const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
     const dragAreaRef = useRef<HTMLDivElement>(null);
     const isMobile = useMediaQuery('(max-width: 768px)');
 
+    // Load history on mount and migrate if needed
+    useEffect(() => {
+        const initHistory = async () => {
+            // 1. Check for legacy localStorage data
+            const savedHistory = localStorage.getItem('flashback_history');
+            if (savedHistory) {
+                try {
+                    const legacyHistory: HistoryItem[] = JSON.parse(savedHistory);
+                    // Migrate to IndexedDB
+                    for (const item of legacyHistory) {
+                        await dbService.saveHistoryItem(item);
+                    }
+                    // Clear legacy storage
+                    localStorage.removeItem('flashback_history');
+                    console.log("Migrated history from localStorage to IndexedDB");
+                } catch (e) {
+                    console.error("Failed to migrate history", e);
+                }
+            }
+
+            // 2. Load from IndexedDB
+            try {
+                const allHistory = await dbService.getAllHistory();
+                setHistory(allHistory);
+            } catch (e) {
+                console.error("Failed to load history from IndexedDB", e);
+            }
+        };
+
+        initHistory();
+    }, []);
+
+    // Auto-save current session to history
+    useEffect(() => {
+        if (appState !== 'idle' && uploadedImage && currentSessionId) {
+            const newItem: HistoryItem = {
+                id: currentSessionId,
+                timestamp: Date.now(),
+                originalImage: uploadedImage,
+                selectedDecades,
+                generatedImages: generatedImages as any,
+                appState: appState as any
+            };
+
+            // Update local state for UI
+            setHistory(prev => {
+                const filtered = prev.filter(item => item.id !== currentSessionId);
+                return [newItem, ...filtered].slice(0, 20); // Can afford more with IndexedDB
+            });
+
+            // Save to IndexedDB
+            dbService.saveHistoryItem(newItem).catch(e => {
+                console.error("Failed to save session to IndexedDB", e);
+            });
+        }
+    }, [generatedImages, appState, uploadedImage, selectedDecades, currentSessionId]);
 
     const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
@@ -81,6 +192,7 @@ function App() {
                 setUploadedImage(reader.result as string);
                 setAppState('image-uploaded');
                 setGeneratedImages({}); // Clear previous results
+                setCurrentSessionId(Date.now().toString()); // Initialize session ID here
             };
             reader.readAsDataURL(file);
         }
@@ -98,10 +210,15 @@ function App() {
         });
         setGeneratedImages(initialImages);
 
-        const concurrencyLimit = 2; // Process two decades at a time
+        const concurrencyLimit = 2; // Allow 2 parallel requests for better speed
         const decadesQueue = [...selectedDecades];
 
-        const processDecade = async (decade: string) => {
+        const processDecade = async (decade: string, index: number) => {
+            // Staggered start: wait 2 seconds per index to spread out initial requests
+            if (index > 0) {
+                await new Promise(resolve => setTimeout(resolve, 2000 * index));
+            }
+            
             try {
                 const prompt = `Reimagine the person in this photo in the style of the ${decade}. This includes clothing, hairstyle, photo quality, and the overall aesthetic of that decade. The output must be a photorealistic image showing the person clearly.`;
                 const resultUrl = await generateDecadeImage(uploadedImage, prompt);
@@ -119,16 +236,9 @@ function App() {
             }
         };
 
-        const workers = Array(concurrencyLimit).fill(null).map(async () => {
-            while (decadesQueue.length > 0) {
-                const decade = decadesQueue.shift();
-                if (decade) {
-                    await processDecade(decade);
-                }
-            }
-        });
-
-        await Promise.all(workers);
+        // Start all processes, they will stagger themselves internally
+        const generationPromises = selectedDecades.map((decade, index) => processDecade(decade, index));
+        await Promise.all(generationPromises);
 
         setIsLoading(false);
         setAppState('results-shown');
@@ -172,6 +282,26 @@ function App() {
         setUploadedImage(null);
         setGeneratedImages({});
         setAppState('idle');
+        setCurrentSessionId(null);
+    };
+
+    const handleSelectHistoryItem = (item: HistoryItem) => {
+        setUploadedImage(item.originalImage);
+        setSelectedDecades(item.selectedDecades);
+        setGeneratedImages(item.generatedImages as any);
+        setAppState(item.appState as any);
+        setCurrentSessionId(item.id);
+        setIsHistoryOpen(false);
+    };
+
+    const handleDeleteHistoryItem = (id: string) => {
+        setHistory(prev => prev.filter(item => item.id !== id));
+        dbService.deleteHistoryItem(id).catch(e => {
+            console.error("Failed to delete item from IndexedDB", e);
+        });
+        if (currentSessionId === id) {
+            handleReset();
+        }
     };
 
     const handleDownloadIndividualImage = (decade: string) => {
@@ -222,6 +352,20 @@ function App() {
         <main className="bg-black text-neutral-200 min-h-screen w-full flex flex-col items-center justify-center p-4 pb-24 overflow-hidden relative">
             <div className="absolute top-0 left-0 w-full h-full bg-grid-white/[0.05]"></div>
             
+            {/* History Toggle Button */}
+            <button
+                onClick={() => setIsHistoryOpen(true)}
+                className="fixed top-6 right-6 z-50 p-3 bg-white/5 hover:bg-white/10 backdrop-blur-md border border-white/10 rounded-full text-white transition-all hover:scale-110 active:scale-95 group"
+                aria-label="Open history"
+            >
+                <Clock size={24} className="group-hover:text-yellow-400 transition-colors" />
+                {history.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-yellow-400 text-black text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-black">
+                        {history.length}
+                    </span>
+                )}
+            </button>
+
             <div className="z-10 flex flex-col items-center justify-center w-full h-full flex-1 min-h-0">
                 <div className="text-center mb-10">
                     <h1 className="text-6xl md:text-8xl font-caveat font-bold text-neutral-100">Flashback AI</h1>
@@ -355,7 +499,8 @@ function App() {
                         ) : (
                             <div ref={dragAreaRef} className="relative w-full max-w-5xl h-[600px] mt-4">
                                 {selectedDecades.map((decade, index) => {
-                                    const { top, left, rotate } = POSITIONS[index];
+                                    const position = POSITIONS[index % POSITIONS.length];
+                                    const { top, left, rotate } = position;
                                     return (
                                         <motion.div
                                             key={decade}
@@ -412,8 +557,24 @@ function App() {
                     onClose={() => setSelectedImage(null)} 
                 />
             )}
+
+            <HistorySidebar 
+                isOpen={isHistoryOpen}
+                onClose={() => setIsHistoryOpen(false)}
+                history={history}
+                onSelect={handleSelectHistoryItem}
+                onDelete={handleDeleteHistoryItem}
+            />
         </main>
     );
 }
 
-export default App;
+function AppWrapper() {
+    return (
+        <ErrorBoundary>
+            <App />
+        </ErrorBoundary>
+    );
+}
+
+export default AppWrapper;

@@ -11,9 +11,6 @@ if (!API_KEY) {
   throw new Error("API_KEY environment variable is not set");
 }
 
-const ai = new GoogleGenAI({ apiKey: API_KEY });
-
-
 // --- Helper Functions ---
 
 /**
@@ -60,30 +57,42 @@ function processGeminiResponse(response: GenerateContentResponse): string {
  * @returns The GenerateContentResponse from the API.
  */
 async function callGeminiWithRetry(imagePart: object, textPart: object): Promise<GenerateContentResponse> {
-    const maxRetries = 3;
-    const initialDelay = 1000;
+    const maxRetries = 4; 
+    const initialDelay = 2000; 
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        // Create a new instance for each call to ensure fresh state/key
+        const ai = new GoogleGenAI({ apiKey: API_KEY! });
+        
         try {
-            return await ai.models.generateContent({
+            // Add a manual timeout to the API call
+            const timeoutPromise = new Promise<never>((_, reject) => 
+                setTimeout(() => reject(new Error("Gemini API request timed out after 60 seconds")), 60000)
+            );
+
+            const fetchPromise = ai.models.generateContent({
                 model: 'gemini-2.5-flash-image',
                 contents: { parts: [imagePart, textPart] },
             });
+
+            return await Promise.race([fetchPromise, timeoutPromise]) as GenerateContentResponse;
         } catch (error) {
             console.error(`Error calling Gemini API (Attempt ${attempt}/${maxRetries}):`, error);
             const errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
+            
             const isInternalError = errorMessage.includes('"code":500') || errorMessage.includes('INTERNAL');
+            const isRateLimitError = errorMessage.includes('"code":429') || errorMessage.includes('RESOURCE_EXHAUSTED');
+            const isTimeout = errorMessage.includes("timed out");
 
-            if (isInternalError && attempt < maxRetries) {
+            if ((isInternalError || isRateLimitError || isTimeout) && attempt < maxRetries) {
                 const delay = initialDelay * Math.pow(2, attempt - 1);
-                console.log(`Internal error detected. Retrying in ${delay}ms...`);
+                console.log(`${isRateLimitError ? 'Rate limit' : isTimeout ? 'Timeout' : 'Internal error'} detected. Retrying in ${delay}ms...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 continue;
             }
-            throw error; // Re-throw if not a retriable error or if max retries are reached.
+            throw error; 
         }
     }
-    // This should be unreachable due to the loop and throw logic above.
     throw new Error("Gemini API call failed after all retries.");
 }
 
