@@ -126,6 +126,7 @@ function App() {
     const [history, setHistory] = useState<HistoryItem[]>([]);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+    const [currentSessionTimestamp, setCurrentSessionTimestamp] = useState<number | null>(null);
     const dragAreaRef = useRef<HTMLDivElement>(null);
     const isMobile = useMediaQuery('(max-width: 768px)');
 
@@ -163,10 +164,10 @@ function App() {
 
     // Auto-save current session to history
     useEffect(() => {
-        if (appState !== 'idle' && uploadedImage && currentSessionId) {
+        if (appState !== 'idle' && uploadedImage && currentSessionId && currentSessionTimestamp) {
             const newItem: HistoryItem = {
                 id: currentSessionId,
-                timestamp: Date.now(),
+                timestamp: currentSessionTimestamp,
                 originalImage: uploadedImage,
                 aspectRatio: imageAspectRatio,
                 selectedDecades,
@@ -177,7 +178,9 @@ function App() {
             // Update local state for UI
             setHistory(prev => {
                 const filtered = prev.filter(item => item.id !== currentSessionId);
-                return [newItem, ...filtered].slice(0, 20); // Can afford more with IndexedDB
+                const updatedHistory = [newItem, ...filtered];
+                // Sort by timestamp to ensure correct order
+                return updatedHistory.sort((a, b) => b.timestamp - a.timestamp).slice(0, 50);
             });
 
             // Save to IndexedDB
@@ -215,7 +218,9 @@ function App() {
 
         setIsLoading(true);
         setAppState('generating');
-        setCurrentSessionId(Date.now().toString()); // Initialize session ID here on Generate
+        const now = Date.now();
+        setCurrentSessionId(now.toString()); // Initialize session ID here on Generate
+        setCurrentSessionTimestamp(now);
         
         const initialImages: Record<string, GeneratedImage[]> = {};
         selectedDecades.forEach(decade => {
@@ -285,7 +290,9 @@ function App() {
         
         console.log(`Regenerating image for ${decade}...`);
 
-        const newId = `${decade}-${Date.now()}`;
+        const now = Date.now();
+        setCurrentSessionTimestamp(now);
+        const newId = `${decade}-${now}`;
 
         // Add a new 'pending' item to the array for this decade
         setGeneratedImages(prev => ({
@@ -331,6 +338,7 @@ function App() {
         setGeneratedImages({});
         setAppState('idle');
         setCurrentSessionId(null);
+        setCurrentSessionTimestamp(null);
     };
 
     const handleSelectHistoryItem = (item: HistoryItem) => {
@@ -352,6 +360,7 @@ function App() {
         setGeneratedImages(migratedImages);
         setAppState(item.appState as any);
         setCurrentSessionId(item.id);
+        setCurrentSessionTimestamp(item.timestamp);
         setIsHistoryOpen(false);
     };
 
