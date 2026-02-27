@@ -8,6 +8,7 @@ import { generateDecadeImage } from './services/geminiService';
 import PolaroidCard from './components/PolaroidCard';
 import ImageModal from './components/ImageModal';
 import HistorySidebar, { HistoryItem } from './components/HistorySidebar';
+import DecadeSelector from './components/DecadeSelector';
 import { createAlbumPage } from './lib/albumUtils';
 import { cn } from './lib/utils';
 import { dbService } from './services/dbService';
@@ -125,6 +126,7 @@ function App() {
     const [selectedImage, setSelectedImage] = useState<{url: string, caption: string} | null>(null);
     const [history, setHistory] = useState<HistoryItem[]>([]);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+    const [isAddMoreOpen, setIsAddMoreOpen] = useState(false);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
     const [currentSessionTimestamp, setCurrentSessionTimestamp] = useState<number | null>(null);
     const dragAreaRef = useRef<HTMLDivElement>(null);
@@ -218,18 +220,25 @@ function App() {
 
         setIsLoading(true);
         setAppState('generating');
-        const now = Date.now();
-        setCurrentSessionId(now.toString()); // Initialize session ID here on Generate
-        setCurrentSessionTimestamp(now);
         
-        const initialImages: Record<string, GeneratedImage[]> = {};
-        selectedDecades.forEach(decade => {
-            initialImages[decade] = [{ status: 'pending', id: `${decade}-${Date.now()}` }];
+        // If no session exists, create one. Otherwise keep the current one.
+        if (!currentSessionId) {
+            const now = Date.now();
+            setCurrentSessionId(now.toString());
+            setCurrentSessionTimestamp(now);
+        }
+        
+        // Identify which decades are new (don't have any images yet)
+        const newDecades = selectedDecades.filter(d => !generatedImages[d] || generatedImages[d].length === 0);
+        
+        // Initialize pending status for new decades
+        setGeneratedImages(prev => {
+            const next = { ...prev };
+            newDecades.forEach(decade => {
+                next[decade] = [{ status: 'pending', id: `${decade}-${Date.now()}` }];
+            });
+            return next;
         });
-        setGeneratedImages(initialImages);
-
-        const concurrencyLimit = 2; // Allow 2 parallel requests for better speed
-        const decadesQueue = [...selectedDecades];
 
         const processDecade = async (decade: string, index: number) => {
             // Staggered start: wait 2 seconds per index to spread out initial requests
@@ -272,12 +281,13 @@ function App() {
             }
         };
 
-        // Start all processes, they will stagger themselves internally
-        const generationPromises = selectedDecades.map((decade, index) => processDecade(decade, index));
+        // Start processes for new decades
+        const generationPromises = newDecades.map((decade, index) => processDecade(decade, index));
         await Promise.all(generationPromises);
 
         setIsLoading(false);
         setAppState('results-shown');
+        setIsAddMoreOpen(false);
     };
 
     const handleRegenerateDecade = async (decade: string) => {
@@ -332,6 +342,17 @@ function App() {
         }
     };
     
+    const handleToggleDecade = (decade: string) => {
+        setSelectedDecades(prev => {
+            if (prev.includes(decade)) {
+                return prev.filter(d => d !== decade);
+            }
+            if (prev.length < 12) { // Increased limit for "Add More"
+                return [...prev, decade];
+            }
+            return prev;
+        });
+    };
     const handleReset = () => {
         setUploadedImage(null);
         setImageAspectRatio(0.75);
@@ -339,6 +360,7 @@ function App() {
         setAppState('idle');
         setCurrentSessionId(null);
         setCurrentSessionTimestamp(null);
+        setIsAddMoreOpen(false);
     };
 
     const handleSelectHistoryItem = (item: HistoryItem) => {
@@ -510,40 +532,13 @@ function App() {
                             </div>
                             
                             <div className="flex-grow w-full">
-                                <div className="bg-neutral-900/50 backdrop-blur-md p-6 rounded-xl border border-white/10">
-                                    <h2 className="font-permanent-marker text-2xl text-yellow-400 mb-4">Select up to 6 Decades</h2>
-                                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-                                        {DECADES.map(decade => {
-                                            const isSelected = selectedDecades.includes(decade);
-                                            const isDisabled = !isSelected && selectedDecades.length >= 6;
-                                            
-                                            return (
-                                                <button
-                                                    key={decade}
-                                                    disabled={isDisabled}
-                                                    onClick={() => {
-                                                        if (isSelected) {
-                                                            setSelectedDecades(prev => prev.filter(d => d !== decade));
-                                                        } else {
-                                                            setSelectedDecades(prev => [...prev, decade]);
-                                                        }
-                                                    }}
-                                                    className={cn(
-                                                        "py-2 px-3 rounded-md font-mono text-sm transition-all duration-200 border",
-                                                        isSelected 
-                                                            ? "bg-yellow-400 text-black border-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.3)]" 
-                                                            : "bg-white/5 text-neutral-400 border-white/10 hover:bg-white/10 disabled:opacity-20 disabled:cursor-not-allowed"
-                                                    )}
-                                                >
-                                                    {decade}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                    <p className="mt-4 text-neutral-500 text-xs font-mono">
-                                        {selectedDecades.length} / 6 selected
-                                    </p>
-                                </div>
+                                <DecadeSelector 
+                                    decades={DECADES}
+                                    selectedDecades={selectedDecades}
+                                    onToggleDecade={handleToggleDecade}
+                                    maxSelection={12}
+                                    title="Select up to 12 Decades"
+                                />
                             </div>
                          </div>
 
@@ -636,20 +631,51 @@ function App() {
                                 })}
                             </div>
                         )}
-                         <div className="h-20 mt-4 flex items-center justify-center">
+                         <div className="mt-4 flex flex-col items-center gap-6">
                             {appState === 'results-shown' && (
-                                <div className="flex flex-col sm:flex-row items-center gap-4">
-                                    <button 
-                                        onClick={handleDownloadAlbum} 
-                                        disabled={isDownloading} 
-                                        className={`${primaryButtonClasses} disabled:opacity-50 disabled:cursor-not-allowed`}
-                                    >
-                                        {isDownloading ? 'Creating Album...' : 'Download Album'}
-                                    </button>
-                                    <button onClick={handleReset} className={secondaryButtonClasses}>
-                                        Start Over
-                                    </button>
-                                </div>
+                                <>
+                                    <div className="flex flex-col sm:flex-row items-center gap-4">
+                                        <button 
+                                            onClick={() => setIsAddMoreOpen(!isAddMoreOpen)}
+                                            className={secondaryButtonClasses}
+                                        >
+                                            {isAddMoreOpen ? 'Hide Decade Selection' : 'Add More Decades'}
+                                        </button>
+                                        <button 
+                                            onClick={handleDownloadAlbum} 
+                                            disabled={isDownloading} 
+                                            className={`${primaryButtonClasses} disabled:opacity-50 disabled:cursor-not-allowed`}
+                                        >
+                                            {isDownloading ? 'Creating Album...' : 'Download Album'}
+                                        </button>
+                                        <button onClick={handleReset} className={secondaryButtonClasses}>
+                                            Start Over
+                                        </button>
+                                    </div>
+
+                                    {isAddMoreOpen && (
+                                        <motion.div 
+                                            initial={{ opacity: 0, y: 20 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            className="w-full max-w-2xl flex flex-col items-center gap-6"
+                                        >
+                                            <DecadeSelector 
+                                                decades={DECADES}
+                                                selectedDecades={selectedDecades}
+                                                onToggleDecade={handleToggleDecade}
+                                                maxSelection={12}
+                                                title="Add More Decades"
+                                            />
+                                            <button 
+                                                onClick={handleGenerateClick}
+                                                disabled={isLoading || selectedDecades.filter(d => !generatedImages[d]).length === 0}
+                                                className={cn(primaryButtonClasses, "w-full sm:w-auto")}
+                                            >
+                                                {isLoading ? 'Generating...' : 'Generate New Decades'}
+                                            </button>
+                                        </motion.div>
+                                    )}
+                                </>
                             )}
                         </div>
                     </>
