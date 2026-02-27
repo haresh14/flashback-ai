@@ -649,14 +649,28 @@ function App() {
             <Footer />
             {selectedImage && (
                 <ImageModal 
-                    imageUrl={selectedImage.url} 
-                    title={selectedImage.caption}
+                    items={[
+                        { url: uploadedImage!, caption: 'Original' },
+                        ...selectedDecades.flatMap(decade => 
+                            (generatedImages[decade] || [])
+                                .filter(img => img.status === 'done' && img.url)
+                                .map(img => ({ url: img.url!, caption: decade }))
+                        )
+                    ]}
+                    initialIndex={[
+                        { url: uploadedImage!, caption: 'Original' },
+                        ...selectedDecades.flatMap(decade => 
+                            (generatedImages[decade] || [])
+                                .filter(img => img.status === 'done' && img.url)
+                                .map(img => ({ url: img.url!, caption: decade }))
+                        )
+                    ].findIndex(item => item.url === selectedImage.url)}
                     onClose={() => setSelectedImage(null)} 
-                    onDownload={() => handleDownloadIndividualImage(selectedImage.caption, selectedImage.url)}
-                    onRegenerate={selectedImage.caption !== 'Original' ? () => {
-                        handleRegenerateDecade(selectedImage.caption);
+                    onDownload={(url, caption) => handleDownloadIndividualImage(caption, url)}
+                    onRegenerate={(caption) => {
+                        handleRegenerateDecade(caption);
                         setSelectedImage(null); // Close modal to show generation progress
-                    } : undefined}
+                    }}
                 />
             )}
 
