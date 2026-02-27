@@ -42,7 +42,7 @@ To run this project, you will need to add the following environment variables to
 4. Create a new API key or copy an existing one.
 5. Add it to your `.env` file like this:
    ```env
-   VITE_GEMINI_API_KEY=your_api_key_here
+   GEMINI_API_KEY=your_api_key_here
    ```
 
 ## How to deploy the project?
