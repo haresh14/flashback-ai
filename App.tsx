@@ -15,6 +15,7 @@ import { cn } from './lib/utils';
 import { dbService } from './services/dbService';
 import Footer from './components/Footer';
 import { Clock, AlertCircle, X } from 'lucide-react';
+import { toast } from 'sonner';
 
 // Error Boundary Component
 interface ErrorBoundaryProps {
@@ -312,6 +313,7 @@ function App() {
                         setHistory(prev => prev.map(h => h.id === capturedSessionId ? item : h));
                     }
                 }
+                toast.success(`Successfully generated ${decade} photo.`);
             } catch (err) {
                 if (activeSessionRef.current === capturedSessionId) {
                     setGeneratedImages(prev => {
@@ -343,12 +345,15 @@ function App() {
                     }
                 }
                 console.error(`Failed to generate image for ${decade}:`, err);
+                toast.error(`Failed to generate ${decade} photo.`);
             }
         };
 
         // Start processes for new decades
         const generationPromises = newDecades.map((decade, index) => processDecade(decade, index));
         await Promise.all(generationPromises);
+        
+        toast.info("All generation processes completed.");
 
         if (activeSessionRef.current === capturedSessionId) {
             setIsLoading(false);
@@ -397,11 +402,22 @@ function App() {
         RateLimitService.recordGeneration(1);
         setRateLimitError(null);
 
-        // Add a new 'pending' item to the array for this decade
-        setGeneratedImages(prev => ({
-            ...prev,
-            [decade]: [...(prev[decade] || []), { status: 'pending', id: newId }],
-        }));
+        // Add a new 'pending' item to the array for this decade, or replace if the last one failed
+        setGeneratedImages(prev => {
+            const currentDecadeImages = [...(prev[decade] || [])];
+            const lastItem = currentDecadeImages[currentDecadeImages.length - 1];
+            
+            if (lastItem && lastItem.status === 'error') {
+                currentDecadeImages[currentDecadeImages.length - 1] = { status: 'pending', id: newId };
+            } else {
+                currentDecadeImages.push({ status: 'pending', id: newId });
+            }
+            
+            return {
+                ...prev,
+                [decade]: currentDecadeImages,
+            };
+        });
 
         // Call the generation service for the specific decade
         try {
@@ -433,6 +449,7 @@ function App() {
                     setHistory(prev => prev.map(h => h.id === capturedSessionId ? item : h));
                 }
             }
+            toast.success(`Successfully regenerated ${decade} photo.`);
         } catch (err) {
             if (activeSessionRef.current === capturedSessionId) {
                 setGeneratedImages(prev => {
@@ -460,6 +477,7 @@ function App() {
                 }
             }
             console.error(`Failed to regenerate image for ${decade}:`, err);
+            toast.error(`Failed to regenerate ${decade} photo.`);
         }
     };
     
