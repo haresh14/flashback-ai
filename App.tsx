@@ -8,9 +8,14 @@ import { generateDecadeImage } from './services/geminiService';
 import PolaroidCard from './components/PolaroidCard';
 import ImageModal from './components/ImageModal';
 import { createAlbumPage } from './lib/albumUtils';
+import { cn } from './lib/utils';
 import Footer from './components/Footer';
 
-const DECADES = ['1950s', '1960s', '1970s', '1980s', '1990s', '2000s'];
+const DECADES = [
+    '1950s', '1960s', '1970s', '1980s', '1990s', '2000s', 
+    '2010s', '2020s', '2030s', '2040s', '2050s', '2060s', 
+    '2070s', '2080s', '2090s', '2100s'
+];
 
 // Pre-defined positions for a scattered look on desktop
 const POSITIONS = [
@@ -62,6 +67,7 @@ function App() {
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [isDownloading, setIsDownloading] = useState<boolean>(false);
     const [appState, setAppState] = useState<'idle' | 'image-uploaded' | 'generating' | 'results-shown'>('idle');
+    const [selectedDecades, setSelectedDecades] = useState<string[]>(['1950s', '1960s', '1970s', '1980s', '1990s', '2000s']);
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
     const dragAreaRef = useRef<HTMLDivElement>(null);
     const isMobile = useMediaQuery('(max-width: 768px)');
@@ -81,19 +87,19 @@ function App() {
     };
 
     const handleGenerateClick = async () => {
-        if (!uploadedImage) return;
+        if (!uploadedImage || selectedDecades.length === 0) return;
 
         setIsLoading(true);
         setAppState('generating');
         
         const initialImages: Record<string, GeneratedImage> = {};
-        DECADES.forEach(decade => {
+        selectedDecades.forEach(decade => {
             initialImages[decade] = { status: 'pending' };
         });
         setGeneratedImages(initialImages);
 
         const concurrencyLimit = 2; // Process two decades at a time
-        const decadesQueue = [...DECADES];
+        const decadesQueue = [...selectedDecades];
 
         const processDecade = async (decade: string) => {
             try {
@@ -190,7 +196,7 @@ function App() {
                     return acc;
                 }, {} as Record<string, string>);
 
-            if (Object.keys(imageData).length < DECADES.length) {
+            if (Object.keys(imageData).length < selectedDecades.length) {
                 alert("Please wait for all images to finish generating before downloading the album.");
                 return;
             }
@@ -263,19 +269,65 @@ function App() {
                 )}
 
                 {appState === 'image-uploaded' && uploadedImage && (
-                    <div className="flex flex-col items-center gap-6">
-                         <PolaroidCard 
-                            imageUrl={uploadedImage} 
-                            caption="Your Photo" 
-                            status="done"
-                            onClick={setSelectedImage}
-                         />
-                         <div className="flex items-center gap-4 mt-4">
+                    <div className="flex flex-col items-center gap-8 w-full max-w-4xl">
+                         <div className="flex flex-col md:flex-row items-center gap-8 w-full">
+                            <div className="flex-shrink-0">
+                                <PolaroidCard 
+                                    imageUrl={uploadedImage} 
+                                    caption="Your Photo" 
+                                    status="done"
+                                    onClick={setSelectedImage}
+                                />
+                            </div>
+                            
+                            <div className="flex-grow w-full">
+                                <div className="bg-neutral-900/50 backdrop-blur-md p-6 rounded-xl border border-white/10">
+                                    <h2 className="font-permanent-marker text-2xl text-yellow-400 mb-4">Select up to 6 Decades</h2>
+                                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                                        {DECADES.map(decade => {
+                                            const isSelected = selectedDecades.includes(decade);
+                                            const isDisabled = !isSelected && selectedDecades.length >= 6;
+                                            
+                                            return (
+                                                <button
+                                                    key={decade}
+                                                    disabled={isDisabled}
+                                                    onClick={() => {
+                                                        if (isSelected) {
+                                                            setSelectedDecades(prev => prev.filter(d => d !== decade));
+                                                        } else {
+                                                            setSelectedDecades(prev => [...prev, decade]);
+                                                        }
+                                                    }}
+                                                    className={cn(
+                                                        "py-2 px-3 rounded-md font-mono text-sm transition-all duration-200 border",
+                                                        isSelected 
+                                                            ? "bg-yellow-400 text-black border-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.3)]" 
+                                                            : "bg-white/5 text-neutral-400 border-white/10 hover:bg-white/10 disabled:opacity-20 disabled:cursor-not-allowed"
+                                                    )}
+                                                >
+                                                    {decade}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    <p className="mt-4 text-neutral-500 text-xs font-mono">
+                                        {selectedDecades.length} / 6 selected
+                                    </p>
+                                </div>
+                            </div>
+                         </div>
+
+                         <div className="flex items-center gap-4">
                             <button onClick={handleReset} className={secondaryButtonClasses}>
                                 Different Photo
                             </button>
-                            <button onClick={handleGenerateClick} className={primaryButtonClasses}>
-                                Generate
+                            <button 
+                                onClick={handleGenerateClick} 
+                                disabled={selectedDecades.length === 0}
+                                className={cn(primaryButtonClasses, "disabled:opacity-50 disabled:cursor-not-allowed")}
+                            >
+                                Generate {selectedDecades.length > 0 ? `(${selectedDecades.length})` : ''}
                             </button>
                          </div>
                     </div>
@@ -285,7 +337,7 @@ function App() {
                      <>
                         {isMobile ? (
                             <div className="w-full max-w-sm flex-1 overflow-y-auto mt-4 space-y-8 p-4">
-                                {DECADES.map((decade) => (
+                                {selectedDecades.map((decade) => (
                                     <div key={decade} className="flex justify-center">
                                          <PolaroidCard
                                             caption={decade}
@@ -302,7 +354,7 @@ function App() {
                             </div>
                         ) : (
                             <div ref={dragAreaRef} className="relative w-full max-w-5xl h-[600px] mt-4">
-                                {DECADES.map((decade, index) => {
+                                {selectedDecades.map((decade, index) => {
                                     const { top, left, rotate } = POSITIONS[index];
                                     return (
                                         <motion.div
