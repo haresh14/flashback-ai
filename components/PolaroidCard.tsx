@@ -14,10 +14,12 @@ interface PolaroidCardProps {
     caption: string;
     status: ImageStatus;
     error?: string;
+    aspectRatio?: number;
+    disableAnimation?: boolean;
     dragConstraintsRef?: React.RefObject<HTMLElement>;
     onShake?: (caption: string) => void;
     onDownload?: (caption: string) => void;
-    onClick?: (imageUrl: string) => void;
+    onClick?: (imageUrl: string, caption: string) => void;
     isMobile?: boolean;
 }
 
@@ -61,11 +63,16 @@ const Placeholder = () => (
 );
 
 
-const PolaroidCard: React.FC<PolaroidCardProps> = ({ imageUrl, caption, status, error, dragConstraintsRef, onShake, onDownload, onClick, isMobile }) => {
-    const [isDeveloped, setIsDeveloped] = useState(false);
-    const [isImageLoaded, setIsImageLoaded] = useState(false);
+const PolaroidCard: React.FC<PolaroidCardProps> = ({ imageUrl, caption, status, error, aspectRatio = 0.75, disableAnimation = false, dragConstraintsRef, onShake, onDownload, onClick, isMobile }) => {
+    const [isDeveloped, setIsDeveloped] = useState(disableAnimation);
+    const [isImageLoaded, setIsImageLoaded] = useState(disableAnimation);
+    const imgRef = useRef<HTMLImageElement>(null);
     const lastShakeTime = useRef(0);
     const lastVelocity = useRef({ x: 0, y: 0 });
+
+    const isLandscape = aspectRatio > 1.1; // Slightly more than 1 to account for nearly square images
+    const cardWidth = isLandscape ? 384 : 320; // w-96 vs w-80
+    const cardAspect = isLandscape ? 'aspect-[4/3]' : 'aspect-[3/4]';
 
     // Reset states when the image URL changes or status goes to pending.
     useEffect(() => {
@@ -74,8 +81,20 @@ const PolaroidCard: React.FC<PolaroidCardProps> = ({ imageUrl, caption, status, 
             setIsImageLoaded(false);
         }
         if (status === 'done' && imageUrl) {
-            setIsDeveloped(false);
-            setIsImageLoaded(false);
+            if (disableAnimation) {
+                setIsDeveloped(true);
+                setIsImageLoaded(true);
+            } else {
+                setIsDeveloped(false);
+                setIsImageLoaded(false);
+            }
+        }
+    }, [imageUrl, status, disableAnimation]);
+
+    // Check if image is already loaded (e.g. from cache)
+    useEffect(() => {
+        if (status === 'done' && imageUrl && imgRef.current?.complete) {
+            setIsImageLoaded(true);
         }
     }, [imageUrl, status]);
 
@@ -127,7 +146,7 @@ const PolaroidCard: React.FC<PolaroidCardProps> = ({ imageUrl, caption, status, 
                 )}
                 onClick={() => {
                     if (status === 'done' && imageUrl && onClick) {
-                        onClick(imageUrl);
+                        onClick(imageUrl, caption);
                     }
                 }}
             >
@@ -181,6 +200,7 @@ const PolaroidCard: React.FC<PolaroidCardProps> = ({ imageUrl, caption, status, 
                         {/* The Image - fades in and color corrects */}
                         <img
                             key={imageUrl}
+                            ref={imgRef}
                             src={imageUrl}
                             alt={caption}
                             onLoad={() => setIsImageLoaded(true)}
@@ -189,7 +209,7 @@ const PolaroidCard: React.FC<PolaroidCardProps> = ({ imageUrl, caption, status, 
                                 ? 'opacity-100 filter-none' 
                                 : 'opacity-80 filter sepia(1) contrast(0.8) brightness(0.8)'
                             }`}
-                            style={{ opacity: isImageLoaded ? undefined : 0 }}
+                            style={{ opacity: isImageLoaded ? 1 : 0 }}
                         />
                     </>
                 )}
@@ -208,7 +228,13 @@ const PolaroidCard: React.FC<PolaroidCardProps> = ({ imageUrl, caption, status, 
 
     if (isMobile) {
         return (
-            <div className="bg-neutral-100 dark:bg-neutral-100 !p-4 !pb-16 flex flex-col items-center justify-start aspect-[3/4] w-80 max-w-full rounded-md shadow-lg relative">
+            <div 
+                className={cn(
+                    "bg-neutral-100 dark:bg-neutral-100 !p-4 !pb-16 flex flex-col items-center justify-start rounded-md shadow-lg relative max-w-full",
+                    cardAspect
+                )}
+                style={{ width: isMobile ? '100%' : cardWidth }}
+            >
                 {cardInnerContent}
             </div>
         );
@@ -217,7 +243,11 @@ const PolaroidCard: React.FC<PolaroidCardProps> = ({ imageUrl, caption, status, 
     return (
         <DraggableCardContainer>
             <DraggableCardBody 
-                className="bg-neutral-100 dark:bg-neutral-100 !p-4 !pb-16 flex flex-col items-center justify-start aspect-[3/4] w-80 max-w-full"
+                className={cn(
+                    "bg-neutral-100 dark:bg-neutral-100 !p-4 !pb-16 flex flex-col items-center justify-start rounded-md shadow-2xl",
+                    cardAspect
+                )}
+                style={{ width: cardWidth }}
                 dragConstraintsRef={dragConstraintsRef}
                 onDragStart={handleDragStart}
                 onDrag={handleDrag}

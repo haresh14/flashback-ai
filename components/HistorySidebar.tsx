@@ -7,6 +7,7 @@ export interface HistoryItem {
     id: string;
     timestamp: number;
     originalImage: string;
+    aspectRatio?: number;
     selectedDecades: string[];
     generatedImages: Record<string, { status: string; url?: string; error?: string }>;
     appState: 'image-uploaded' | 'generating' | 'results-shown';

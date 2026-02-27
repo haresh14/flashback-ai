@@ -115,12 +115,13 @@ const useMediaQuery = (query: string) => {
 
 function App() {
     const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+    const [imageAspectRatio, setImageAspectRatio] = useState<number>(0.75); // Default to 3/4
     const [generatedImages, setGeneratedImages] = useState<Record<string, GeneratedImage>>({});
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [isDownloading, setIsDownloading] = useState<boolean>(false);
     const [appState, setAppState] = useState<'idle' | 'image-uploaded' | 'generating' | 'results-shown'>('idle');
     const [selectedDecades, setSelectedDecades] = useState<string[]>(['1950s', '1960s', '1970s', '1980s', '1990s', '2000s']);
-    const [selectedImage, setSelectedImage] = useState<string | null>(null);
+    const [selectedImage, setSelectedImage] = useState<{url: string, caption: string} | null>(null);
     const [history, setHistory] = useState<HistoryItem[]>([]);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -166,6 +167,7 @@ function App() {
                 id: currentSessionId,
                 timestamp: Date.now(),
                 originalImage: uploadedImage,
+                aspectRatio: imageAspectRatio,
                 selectedDecades,
                 generatedImages: generatedImages as any,
                 appState: appState as any
@@ -189,10 +191,19 @@ function App() {
             const file = e.target.files[0];
             const reader = new FileReader();
             reader.onloadend = () => {
-                setUploadedImage(reader.result as string);
+                const base64 = reader.result as string;
+                setUploadedImage(base64);
+                
+                // Detect aspect ratio
+                const img = new Image();
+                img.onload = () => {
+                    setImageAspectRatio(img.width / img.height);
+                };
+                img.src = base64;
+
                 setAppState('image-uploaded');
                 setGeneratedImages({}); // Clear previous results
-                setCurrentSessionId(Date.now().toString()); // Initialize session ID here
+                setCurrentSessionId(null); // Don't set session ID yet, wait for Generate
             };
             reader.readAsDataURL(file);
         }
@@ -203,6 +214,7 @@ function App() {
 
         setIsLoading(true);
         setAppState('generating');
+        setCurrentSessionId(Date.now().toString()); // Initialize session ID here on Generate
         
         const initialImages: Record<string, GeneratedImage> = {};
         selectedDecades.forEach(decade => {
@@ -280,6 +292,7 @@ function App() {
     
     const handleReset = () => {
         setUploadedImage(null);
+        setImageAspectRatio(0.75);
         setGeneratedImages({});
         setAppState('idle');
         setCurrentSessionId(null);
@@ -287,6 +300,7 @@ function App() {
 
     const handleSelectHistoryItem = (item: HistoryItem) => {
         setUploadedImage(item.originalImage);
+        setImageAspectRatio(item.aspectRatio || 0.75);
         setSelectedDecades(item.selectedDecades);
         setGeneratedImages(item.generatedImages as any);
         setAppState(item.appState as any);
@@ -418,9 +432,11 @@ function App() {
                             <div className="flex-shrink-0">
                                 <PolaroidCard 
                                     imageUrl={uploadedImage} 
-                                    caption="Your Photo" 
+                                    aspectRatio={imageAspectRatio}
+                                    caption="Original" 
                                     status="done"
-                                    onClick={setSelectedImage}
+                                    disableAnimation={true}
+                                    onClick={(url, caption) => setSelectedImage({ url, caption })}
                                 />
                             </div>
                             
@@ -480,22 +496,23 @@ function App() {
                 {(appState === 'generating' || appState === 'results-shown') && (
                      <>
                         {isMobile ? (
-                            <div className="w-full max-w-sm flex-1 overflow-y-auto mt-4 space-y-8 p-4">
-                                {selectedDecades.map((decade) => (
-                                    <div key={decade} className="flex justify-center">
-                                         <PolaroidCard
-                                            caption={decade}
-                                            status={generatedImages[decade]?.status || 'pending'}
-                                            imageUrl={generatedImages[decade]?.url}
-                                            error={generatedImages[decade]?.error}
-                                            onShake={handleRegenerateDecade}
-                                            onDownload={handleDownloadIndividualImage}
-                                            onClick={setSelectedImage}
-                                            isMobile={isMobile}
-                                        />
-                                    </div>
-                                ))}
-                            </div>
+                                <div className="w-full max-w-sm flex-1 overflow-y-auto mt-4 space-y-8 p-4">
+                                    {selectedDecades.map((decade) => (
+                                        <div key={decade} className="flex justify-center">
+                                             <PolaroidCard
+                                                caption={decade}
+                                                aspectRatio={imageAspectRatio}
+                                                status={generatedImages[decade]?.status || 'pending'}
+                                                imageUrl={generatedImages[decade]?.url}
+                                                error={generatedImages[decade]?.error}
+                                                onShake={handleRegenerateDecade}
+                                                onDownload={handleDownloadIndividualImage}
+                                                onClick={(url, caption) => setSelectedImage({ url, caption })}
+                                                isMobile={isMobile}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
                         ) : (
                             <div ref={dragAreaRef} className="relative w-full max-w-5xl h-[600px] mt-4">
                                 {selectedDecades.map((decade, index) => {
@@ -518,12 +535,13 @@ function App() {
                                             <PolaroidCard 
                                                 dragConstraintsRef={dragAreaRef}
                                                 caption={decade}
+                                                aspectRatio={imageAspectRatio}
                                                 status={generatedImages[decade]?.status || 'pending'}
                                                 imageUrl={generatedImages[decade]?.url}
                                                 error={generatedImages[decade]?.error}
                                                 onShake={handleRegenerateDecade}
                                                 onDownload={handleDownloadIndividualImage}
-                                                onClick={setSelectedImage}
+                                                onClick={(url, caption) => setSelectedImage({ url, caption })}
                                                 isMobile={isMobile}
                                             />
                                         </motion.div>
@@ -553,7 +571,8 @@ function App() {
             <Footer />
             {selectedImage && (
                 <ImageModal 
-                    imageUrl={selectedImage} 
+                    imageUrl={selectedImage.url} 
+                    title={selectedImage.caption}
                     onClose={() => setSelectedImage(null)} 
                 />
             )}

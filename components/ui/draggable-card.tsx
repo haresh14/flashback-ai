@@ -18,12 +18,14 @@ import {
 export const DraggableCardBody = ({
   className,
   children,
+  style,
   dragConstraintsRef,
   onDrag,
   onDragStart,
 }: {
   className?: string;
   children?: React.ReactNode;
+  style?: React.CSSProperties;
   dragConstraintsRef?: React.RefObject<HTMLElement>;
   onDrag?: (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => void;
   onDragStart?: (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => void;
@@ -141,6 +143,7 @@ export const DraggableCardBody = ({
         rotateY,
         opacity,
         willChange: "transform",
+        ...style,
       }}
       animate={controls}
       whileHover={{ scale: 1.02 }}
@@ -148,7 +151,7 @@ export const DraggableCardBody = ({
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       className={cn(
-        "relative min-h-96 w-80 overflow-hidden rounded-md bg-neutral-100 p-6 shadow-2xl [transform-style:preserve-3d] dark:bg-neutral-900",
+        "relative overflow-hidden rounded-md bg-neutral-100 p-6 shadow-2xl [transform-style:preserve-3d] dark:bg-neutral-900",
         className,
       )}
     >

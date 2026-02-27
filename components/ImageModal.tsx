@@ -4,10 +4,11 @@ import { ZoomIn, ZoomOut, X } from 'lucide-react';
 
 interface ImageModalProps {
     imageUrl: string;
+    title?: string;
     onClose: () => void;
 }
 
-const ImageModal: React.FC<ImageModalProps> = ({ imageUrl, onClose }) => {
+const ImageModal: React.FC<ImageModalProps> = ({ imageUrl, title, onClose }) => {
     const [scale, setScale] = useState(1);
 
     const handleZoomIn = (e: React.MouseEvent) => {
@@ -40,11 +41,16 @@ const ImageModal: React.FC<ImageModalProps> = ({ imageUrl, onClose }) => {
                     <div className="relative overflow-hidden rounded-lg shadow-2xl">
                         <motion.img
                             src={imageUrl}
-                            alt="Zoomed view"
+                            alt={title || "Zoomed view"}
                             animate={{ scale }}
                             transition={{ type: 'spring', damping: 20, stiffness: 100 }}
                             className="max-w-full max-h-[80vh] object-contain"
                         />
+                        {title && (
+                            <div className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-sm p-4 text-center">
+                                <p className="font-permanent-marker text-white text-xl sm:text-2xl">{title}</p>
+                            </div>
+                        )}
                     </div>
 
                     <div className="absolute top-4 right-4 flex gap-2">
