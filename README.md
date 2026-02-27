@@ -31,7 +31,7 @@ Check out the live demo here: [https://flashback-ai.netlify.app](https://flashba
 ## Environment Variables
 To run this project, you will need to add the following environment variables to your `.env` file:
 
-- `VITE_GEMINI_API_KEY`: Your Google Gemini API key.
+- `GEMINI_API_KEY`: Your Google Gemini API key.
 - `VITE_MAX_PHOTOS`: Howmany photos user can generate in `VITE_LIMIT_MINUTES` minutes.
 - `VITE_LIMIT_MINUTES`: In howmany minutes, user can generate maximum photos set with `VITE_MAX_PHOTOS`.
 
@@ -56,7 +56,7 @@ This project is configured for easy deployment on Netlify.
 6. Netlify will automatically detect the build settings from the `netlify.toml` file:
    - Build command: `npm run build`
    - Publish directory: `dist`
-7. Click "Show advanced" and add your `VITE_GEMINI_API_KEY` environment variable.
+7. Click "Show advanced" and add your `GEMINI_API_KEY` environment variable.
 8. Click "Deploy site".
 
 ## How to test the project?
