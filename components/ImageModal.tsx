@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ZoomIn, ZoomOut, X } from 'lucide-react';
+import { ZoomIn, ZoomOut, X, Download, RefreshCcw } from 'lucide-react';
 
 interface ImageModalProps {
     imageUrl: string;
     title?: string;
     onClose: () => void;
+    onDownload?: () => void;
+    onRegenerate?: () => void;
 }
 
-const ImageModal: React.FC<ImageModalProps> = ({ imageUrl, title, onClose }) => {
+const ImageModal: React.FC<ImageModalProps> = ({ imageUrl, title, onClose, onDownload, onRegenerate }) => {
     const [scale, setScale] = useState(1);
 
     const handleZoomIn = (e: React.MouseEvent) => {
@@ -54,6 +56,30 @@ const ImageModal: React.FC<ImageModalProps> = ({ imageUrl, title, onClose }) => 
                     </div>
 
                     <div className="absolute top-4 right-4 flex gap-2">
+                        {onRegenerate && (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onRegenerate();
+                                }}
+                                className="p-2 bg-yellow-400 hover:bg-yellow-300 text-black rounded-full transition-colors shadow-lg"
+                                title="Regenerate this decade"
+                            >
+                                <RefreshCcw size={24} />
+                            </button>
+                        )}
+                        {onDownload && (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDownload();
+                                }}
+                                className="p-2 bg-white/20 hover:bg-white/40 text-white rounded-full transition-colors backdrop-blur-md border border-white/30"
+                                title="Download image"
+                            >
+                                <Download size={24} />
+                            </button>
+                        )}
                         <button
                             onClick={onClose}
                             className="p-2 bg-black/50 hover:bg-black/80 text-white rounded-full transition-colors"

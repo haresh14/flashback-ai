@@ -319,6 +319,16 @@ function App() {
     };
 
     const handleDownloadIndividualImage = (decade: string) => {
+        if (decade === 'Original' && uploadedImage) {
+            const link = document.createElement('a');
+            link.href = uploadedImage;
+            link.download = `past-forward-original.jpg`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            return;
+        }
+
         const image = generatedImages[decade];
         if (image?.status === 'done' && image.url) {
             const link = document.createElement('a');
@@ -530,6 +540,12 @@ function App() {
                                                 y: 0,
                                                 rotate: `${rotate}deg`,
                                             }}
+                                            whileHover={{ 
+                                                zIndex: 50, 
+                                                scale: 1.05,
+                                                rotate: 0,
+                                                transition: { duration: 0.2 }
+                                            }}
                                             transition={{ type: 'spring', stiffness: 100, damping: 20, delay: index * 0.15 }}
                                         >
                                             <PolaroidCard 
@@ -574,6 +590,11 @@ function App() {
                     imageUrl={selectedImage.url} 
                     title={selectedImage.caption}
                     onClose={() => setSelectedImage(null)} 
+                    onDownload={() => handleDownloadIndividualImage(selectedImage.caption)}
+                    onRegenerate={selectedImage.caption !== 'Original' ? () => {
+                        handleRegenerateDecade(selectedImage.caption);
+                        setSelectedImage(null); // Close modal to show generation progress
+                    } : undefined}
                 />
             )}
 
