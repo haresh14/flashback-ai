@@ -135,6 +135,11 @@ function App() {
     const [currentSessionTimestamp, setCurrentSessionTimestamp] = useState<number | null>(null);
     const dragAreaRef = useRef<HTMLDivElement>(null);
     const isMobile = useMediaQuery('(max-width: 768px)');
+    const activeSessionRef = useRef<string | null>(null);
+
+    useEffect(() => {
+        activeSessionRef.current = currentSessionId;
+    }, [currentSessionId]);
 
     // Load history on mount and migrate if needed
     useEffect(() => {
@@ -246,12 +251,18 @@ function App() {
         RateLimitService.recordGeneration(newDecades.length);
         
         // If no session exists, create one. Otherwise keep the current one.
-        if (!currentSessionId) {
+        let sessionId = currentSessionId;
+        if (!sessionId) {
             const now = Date.now();
-            setCurrentSessionId(now.toString());
+            sessionId = now.toString();
+            setCurrentSessionId(sessionId);
             setCurrentSessionTimestamp(now);
+            activeSessionRef.current = sessionId;
         }
         
+        const capturedSessionId = sessionId;
+        const capturedUploadedImage = uploadedImage;
+
         // Initialize pending status for new decades
         setGeneratedImages(prev => {
             const next = { ...prev };
@@ -269,34 +280,68 @@ function App() {
             
             try {
                 const prompt = `Reimagine the person in this photo in the style of the ${decade}. This includes clothing, hairstyle, photo quality, and the overall aesthetic of that decade. The output must be a photorealistic image showing the person clearly.`;
-                const resultUrl = await generateDecadeImage(uploadedImage, prompt);
-                setGeneratedImages(prev => {
-                    const currentDecadeImages = [...(prev[decade] || [])];
-                    const pendingIndex = currentDecadeImages.findIndex(img => img.status === 'pending');
-                    if (pendingIndex !== -1) {
-                        currentDecadeImages[pendingIndex] = { ...currentDecadeImages[pendingIndex], status: 'done', url: resultUrl };
-                    } else {
-                        currentDecadeImages.push({ status: 'done', url: resultUrl, id: `${decade}-${Date.now()}` });
+                const resultUrl = await generateDecadeImage(capturedUploadedImage, prompt);
+                
+                if (activeSessionRef.current === capturedSessionId) {
+                    setGeneratedImages(prev => {
+                        const currentDecadeImages = [...(prev[decade] || [])];
+                        const pendingIndex = currentDecadeImages.findIndex(img => img.status === 'pending');
+                        if (pendingIndex !== -1) {
+                            currentDecadeImages[pendingIndex] = { ...currentDecadeImages[pendingIndex], status: 'done', url: resultUrl };
+                        } else {
+                            currentDecadeImages.push({ status: 'done', url: resultUrl, id: `${decade}-${Date.now()}` });
+                        }
+                        return {
+                            ...prev,
+                            [decade]: currentDecadeImages,
+                        };
+                    });
+                } else {
+                    // Update background session in IndexedDB
+                    const item = await dbService.getHistoryItem(capturedSessionId);
+                    if (item) {
+                        const currentDecadeImages = [...(item.generatedImages[decade] || [])];
+                        const pendingIndex = currentDecadeImages.findIndex(img => img.status === 'pending');
+                        if (pendingIndex !== -1) {
+                            currentDecadeImages[pendingIndex] = { ...currentDecadeImages[pendingIndex], status: 'done', url: resultUrl };
+                        } else {
+                            currentDecadeImages.push({ status: 'done', url: resultUrl, id: `${decade}-${Date.now()}` });
+                        }
+                        item.generatedImages[decade] = currentDecadeImages;
+                        await dbService.saveHistoryItem(item);
+                        setHistory(prev => prev.map(h => h.id === capturedSessionId ? item : h));
                     }
-                    return {
-                        ...prev,
-                        [decade]: currentDecadeImages,
-                    };
-                });
+                }
             } catch (err) {
-                setGeneratedImages(prev => {
-                    const currentDecadeImages = [...(prev[decade] || [])];
-                    const pendingIndex = currentDecadeImages.findIndex(img => img.status === 'pending');
-                    if (pendingIndex !== -1) {
-                        currentDecadeImages[pendingIndex] = { ...currentDecadeImages[pendingIndex], status: 'error', error: GENERIC_ERROR_MESSAGE };
-                    } else {
-                        currentDecadeImages.push({ status: 'error', error: GENERIC_ERROR_MESSAGE, id: `${decade}-${Date.now()}` });
+                if (activeSessionRef.current === capturedSessionId) {
+                    setGeneratedImages(prev => {
+                        const currentDecadeImages = [...(prev[decade] || [])];
+                        const pendingIndex = currentDecadeImages.findIndex(img => img.status === 'pending');
+                        if (pendingIndex !== -1) {
+                            currentDecadeImages[pendingIndex] = { ...currentDecadeImages[pendingIndex], status: 'error', error: GENERIC_ERROR_MESSAGE };
+                        } else {
+                            currentDecadeImages.push({ status: 'error', error: GENERIC_ERROR_MESSAGE, id: `${decade}-${Date.now()}` });
+                        }
+                        return {
+                            ...prev,
+                            [decade]: currentDecadeImages,
+                        };
+                    });
+                } else {
+                    const item = await dbService.getHistoryItem(capturedSessionId);
+                    if (item) {
+                        const currentDecadeImages = [...(item.generatedImages[decade] || [])];
+                        const pendingIndex = currentDecadeImages.findIndex(img => img.status === 'pending');
+                        if (pendingIndex !== -1) {
+                            currentDecadeImages[pendingIndex] = { ...currentDecadeImages[pendingIndex], status: 'error', error: GENERIC_ERROR_MESSAGE };
+                        } else {
+                            currentDecadeImages.push({ status: 'error', error: GENERIC_ERROR_MESSAGE, id: `${decade}-${Date.now()}` });
+                        }
+                        item.generatedImages[decade] = currentDecadeImages;
+                        await dbService.saveHistoryItem(item);
+                        setHistory(prev => prev.map(h => h.id === capturedSessionId ? item : h));
                     }
-                    return {
-                        ...prev,
-                        [decade]: currentDecadeImages,
-                    };
-                });
+                }
                 console.error(`Failed to generate image for ${decade}:`, err);
             }
         };
@@ -305,13 +350,23 @@ function App() {
         const generationPromises = newDecades.map((decade, index) => processDecade(decade, index));
         await Promise.all(generationPromises);
 
-        setIsLoading(false);
-        setAppState('results-shown');
-        setIsAddMoreOpen(false);
+        if (activeSessionRef.current === capturedSessionId) {
+            setIsLoading(false);
+            setAppState('results-shown');
+            setIsAddMoreOpen(false);
+        } else {
+            // Update the background session state
+            const item = await dbService.getHistoryItem(capturedSessionId);
+            if (item) {
+                item.appState = 'results-shown';
+                await dbService.saveHistoryItem(item);
+                setHistory(prev => prev.map(h => h.id === capturedSessionId ? item : h));
+            }
+        }
     };
 
     const handleRegenerateDecade = async (decade: string) => {
-        if (!uploadedImage) return;
+        if (!uploadedImage || !currentSessionId) return;
 
         // Prevent re-triggering if a generation is already in progress for this decade
         if (generatedImages[decade]?.some(img => img.status === 'pending')) {
@@ -334,6 +389,9 @@ function App() {
         const now = Date.now();
         setCurrentSessionTimestamp(now);
         const newId = `${decade}-${now}`;
+        
+        const capturedSessionId = currentSessionId;
+        const capturedUploadedImage = uploadedImage;
 
         // Record generation
         RateLimitService.recordGeneration(1);
@@ -348,30 +406,59 @@ function App() {
         // Call the generation service for the specific decade
         try {
             const prompt = `Reimagine the person in this photo in the style of the ${decade}. This includes clothing, hairstyle, photo quality, and the overall aesthetic of that decade. The output must be a photorealistic image showing the person clearly.`;
-            const resultUrl = await generateDecadeImage(uploadedImage, prompt);
-            setGeneratedImages(prev => {
-                const currentDecadeImages = [...(prev[decade] || [])];
-                const itemIndex = currentDecadeImages.findIndex(img => img.id === newId);
-                if (itemIndex !== -1) {
-                    currentDecadeImages[itemIndex] = { ...currentDecadeImages[itemIndex], status: 'done', url: resultUrl };
+            const resultUrl = await generateDecadeImage(capturedUploadedImage, prompt);
+            
+            if (activeSessionRef.current === capturedSessionId) {
+                setGeneratedImages(prev => {
+                    const currentDecadeImages = [...(prev[decade] || [])];
+                    const itemIndex = currentDecadeImages.findIndex(img => img.id === newId);
+                    if (itemIndex !== -1) {
+                        currentDecadeImages[itemIndex] = { ...currentDecadeImages[itemIndex], status: 'done', url: resultUrl };
+                    }
+                    return {
+                        ...prev,
+                        [decade]: currentDecadeImages,
+                    };
+                });
+            } else {
+                const item = await dbService.getHistoryItem(capturedSessionId);
+                if (item) {
+                    const currentDecadeImages = [...(item.generatedImages[decade] || [])];
+                    const itemIndex = currentDecadeImages.findIndex(img => img.id === newId);
+                    if (itemIndex !== -1) {
+                        currentDecadeImages[itemIndex] = { ...currentDecadeImages[itemIndex], status: 'done', url: resultUrl };
+                    }
+                    item.generatedImages[decade] = currentDecadeImages;
+                    await dbService.saveHistoryItem(item);
+                    setHistory(prev => prev.map(h => h.id === capturedSessionId ? item : h));
                 }
-                return {
-                    ...prev,
-                    [decade]: currentDecadeImages,
-                };
-            });
+            }
         } catch (err) {
-            setGeneratedImages(prev => {
-                const currentDecadeImages = [...(prev[decade] || [])];
-                const itemIndex = currentDecadeImages.findIndex(img => img.id === newId);
-                if (itemIndex !== -1) {
-                    currentDecadeImages[itemIndex] = { ...currentDecadeImages[itemIndex], status: 'error', error: GENERIC_ERROR_MESSAGE };
+            if (activeSessionRef.current === capturedSessionId) {
+                setGeneratedImages(prev => {
+                    const currentDecadeImages = [...(prev[decade] || [])];
+                    const itemIndex = currentDecadeImages.findIndex(img => img.id === newId);
+                    if (itemIndex !== -1) {
+                        currentDecadeImages[itemIndex] = { ...currentDecadeImages[itemIndex], status: 'error', error: GENERIC_ERROR_MESSAGE };
+                    }
+                    return {
+                        ...prev,
+                        [decade]: currentDecadeImages,
+                    };
+                });
+            } else {
+                const item = await dbService.getHistoryItem(capturedSessionId);
+                if (item) {
+                    const currentDecadeImages = [...(item.generatedImages[decade] || [])];
+                    const itemIndex = currentDecadeImages.findIndex(img => img.id === newId);
+                    if (itemIndex !== -1) {
+                        currentDecadeImages[itemIndex] = { ...currentDecadeImages[itemIndex], status: 'error', error: GENERIC_ERROR_MESSAGE };
+                    }
+                    item.generatedImages[decade] = currentDecadeImages;
+                    await dbService.saveHistoryItem(item);
+                    setHistory(prev => prev.map(h => h.id === capturedSessionId ? item : h));
                 }
-                return {
-                    ...prev,
-                    [decade]: currentDecadeImages,
-                };
-            });
+            }
             console.error(`Failed to regenerate image for ${decade}:`, err);
         }
     };
