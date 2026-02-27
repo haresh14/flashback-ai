@@ -94,6 +94,7 @@ interface GeneratedImage {
     status: ImageStatus;
     url?: string;
     error?: string;
+    id: string;
 }
 
 const primaryButtonClasses = "font-permanent-marker text-xl text-center text-black bg-yellow-400 py-3 px-8 rounded-sm transform transition-transform duration-200 hover:scale-105 hover:-rotate-2 hover:bg-yellow-300 shadow-[2px_2px_0px_2px_rgba(0,0,0,0.2)]";
@@ -116,7 +117,7 @@ const useMediaQuery = (query: string) => {
 function App() {
     const [uploadedImage, setUploadedImage] = useState<string | null>(null);
     const [imageAspectRatio, setImageAspectRatio] = useState<number>(0.75); // Default to 3/4
-    const [generatedImages, setGeneratedImages] = useState<Record<string, GeneratedImage>>({});
+    const [generatedImages, setGeneratedImages] = useState<Record<string, GeneratedImage[]>>({});
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [isDownloading, setIsDownloading] = useState<boolean>(false);
     const [appState, setAppState] = useState<'idle' | 'image-uploaded' | 'generating' | 'results-shown'>('idle');
@@ -216,9 +217,9 @@ function App() {
         setAppState('generating');
         setCurrentSessionId(Date.now().toString()); // Initialize session ID here on Generate
         
-        const initialImages: Record<string, GeneratedImage> = {};
+        const initialImages: Record<string, GeneratedImage[]> = {};
         selectedDecades.forEach(decade => {
-            initialImages[decade] = { status: 'pending' };
+            initialImages[decade] = [{ status: 'pending', id: `${decade}-${Date.now()}` }];
         });
         setGeneratedImages(initialImages);
 
@@ -234,16 +235,34 @@ function App() {
             try {
                 const prompt = `Reimagine the person in this photo in the style of the ${decade}. This includes clothing, hairstyle, photo quality, and the overall aesthetic of that decade. The output must be a photorealistic image showing the person clearly.`;
                 const resultUrl = await generateDecadeImage(uploadedImage, prompt);
-                setGeneratedImages(prev => ({
-                    ...prev,
-                    [decade]: { status: 'done', url: resultUrl },
-                }));
+                setGeneratedImages(prev => {
+                    const currentDecadeImages = [...(prev[decade] || [])];
+                    const pendingIndex = currentDecadeImages.findIndex(img => img.status === 'pending');
+                    if (pendingIndex !== -1) {
+                        currentDecadeImages[pendingIndex] = { ...currentDecadeImages[pendingIndex], status: 'done', url: resultUrl };
+                    } else {
+                        currentDecadeImages.push({ status: 'done', url: resultUrl, id: `${decade}-${Date.now()}` });
+                    }
+                    return {
+                        ...prev,
+                        [decade]: currentDecadeImages,
+                    };
+                });
             } catch (err) {
                 const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-                setGeneratedImages(prev => ({
-                    ...prev,
-                    [decade]: { status: 'error', error: errorMessage },
-                }));
+                setGeneratedImages(prev => {
+                    const currentDecadeImages = [...(prev[decade] || [])];
+                    const pendingIndex = currentDecadeImages.findIndex(img => img.status === 'pending');
+                    if (pendingIndex !== -1) {
+                        currentDecadeImages[pendingIndex] = { ...currentDecadeImages[pendingIndex], status: 'error', error: errorMessage };
+                    } else {
+                        currentDecadeImages.push({ status: 'error', error: errorMessage, id: `${decade}-${Date.now()}` });
+                    }
+                    return {
+                        ...prev,
+                        [decade]: currentDecadeImages,
+                    };
+                });
                 console.error(`Failed to generate image for ${decade}:`, err);
             }
         };
@@ -259,33 +278,49 @@ function App() {
     const handleRegenerateDecade = async (decade: string) => {
         if (!uploadedImage) return;
 
-        // Prevent re-triggering if a generation is already in progress
-        if (generatedImages[decade]?.status === 'pending') {
+        // Prevent re-triggering if a generation is already in progress for this decade
+        if (generatedImages[decade]?.some(img => img.status === 'pending')) {
             return;
         }
         
         console.log(`Regenerating image for ${decade}...`);
 
-        // Set the specific decade to 'pending' to show the loading spinner
+        const newId = `${decade}-${Date.now()}`;
+
+        // Add a new 'pending' item to the array for this decade
         setGeneratedImages(prev => ({
             ...prev,
-            [decade]: { status: 'pending' },
+            [decade]: [...(prev[decade] || []), { status: 'pending', id: newId }],
         }));
 
         // Call the generation service for the specific decade
         try {
             const prompt = `Reimagine the person in this photo in the style of the ${decade}. This includes clothing, hairstyle, photo quality, and the overall aesthetic of that decade. The output must be a photorealistic image showing the person clearly.`;
             const resultUrl = await generateDecadeImage(uploadedImage, prompt);
-            setGeneratedImages(prev => ({
-                ...prev,
-                [decade]: { status: 'done', url: resultUrl },
-            }));
+            setGeneratedImages(prev => {
+                const currentDecadeImages = [...(prev[decade] || [])];
+                const itemIndex = currentDecadeImages.findIndex(img => img.id === newId);
+                if (itemIndex !== -1) {
+                    currentDecadeImages[itemIndex] = { ...currentDecadeImages[itemIndex], status: 'done', url: resultUrl };
+                }
+                return {
+                    ...prev,
+                    [decade]: currentDecadeImages,
+                };
+            });
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-            setGeneratedImages(prev => ({
-                ...prev,
-                [decade]: { status: 'error', error: errorMessage },
-            }));
+            setGeneratedImages(prev => {
+                const currentDecadeImages = [...(prev[decade] || [])];
+                const itemIndex = currentDecadeImages.findIndex(img => img.id === newId);
+                if (itemIndex !== -1) {
+                    currentDecadeImages[itemIndex] = { ...currentDecadeImages[itemIndex], status: 'error', error: errorMessage };
+                }
+                return {
+                    ...prev,
+                    [decade]: currentDecadeImages,
+                };
+            });
             console.error(`Failed to regenerate image for ${decade}:`, err);
         }
     };
@@ -302,7 +337,19 @@ function App() {
         setUploadedImage(item.originalImage);
         setImageAspectRatio(item.aspectRatio || 0.75);
         setSelectedDecades(item.selectedDecades);
-        setGeneratedImages(item.generatedImages as any);
+        
+        // Migrate old history format if needed
+        const migratedImages: Record<string, GeneratedImage[]> = {};
+        Object.entries(item.generatedImages).forEach(([decade, data]) => {
+            if (Array.isArray(data)) {
+                migratedImages[decade] = data as GeneratedImage[];
+            } else {
+                // It's the old format: { status, url, error }
+                migratedImages[decade] = [{ ...(data as any), id: `${decade}-legacy` }] as GeneratedImage[];
+            }
+        });
+        
+        setGeneratedImages(migratedImages);
         setAppState(item.appState as any);
         setCurrentSessionId(item.id);
         setIsHistoryOpen(false);
@@ -318,7 +365,7 @@ function App() {
         }
     };
 
-    const handleDownloadIndividualImage = (decade: string) => {
+    const handleDownloadIndividualImage = (decade: string, url?: string) => {
         if (decade === 'Original' && uploadedImage) {
             const link = document.createElement('a');
             link.href = uploadedImage;
@@ -329,10 +376,11 @@ function App() {
             return;
         }
 
-        const image = generatedImages[decade];
-        if (image?.status === 'done' && image.url) {
+        const targetUrl = url || (generatedImages[decade] ? [...generatedImages[decade]].reverse().find(img => img.status === 'done')?.url : undefined);
+        
+        if (targetUrl) {
             const link = document.createElement('a');
-            link.href = image.url;
+            link.href = targetUrl;
             link.download = `past-forward-${decade}.jpg`;
             document.body.appendChild(link);
             link.click();
@@ -343,10 +391,12 @@ function App() {
     const handleDownloadAlbum = async () => {
         setIsDownloading(true);
         try {
-            const imageData = (Object.entries(generatedImages) as [string, GeneratedImage][])
-                .filter(([, image]) => image.status === 'done' && image.url)
-                .reduce((acc, [decade, image]) => {
-                    acc[decade] = image.url!;
+            const imageData = (Object.entries(generatedImages) as [string, GeneratedImage[]][])
+                .reduce((acc, [decade, images]) => {
+                    const latestDone = [...images].reverse().find(img => img.status === 'done');
+                    if (latestDone?.url) {
+                        acc[decade] = latestDone.url;
+                    }
                     return acc;
                 }, {} as Record<string, string>);
 
@@ -507,61 +557,73 @@ function App() {
                      <>
                         {isMobile ? (
                                 <div className="w-full max-w-sm flex-1 overflow-y-auto mt-4 space-y-8 p-4">
-                                    {selectedDecades.map((decade) => (
-                                        <div key={decade} className="flex justify-center">
-                                             <PolaroidCard
-                                                caption={decade}
-                                                aspectRatio={imageAspectRatio}
-                                                status={generatedImages[decade]?.status || 'pending'}
-                                                imageUrl={generatedImages[decade]?.url}
-                                                error={generatedImages[decade]?.error}
-                                                onShake={handleRegenerateDecade}
-                                                onDownload={handleDownloadIndividualImage}
-                                                onClick={(url, caption) => setSelectedImage({ url, caption })}
-                                                isMobile={isMobile}
-                                            />
-                                        </div>
-                                    ))}
+                                    {selectedDecades.flatMap((decade) => {
+                                        const images = generatedImages[decade] || [];
+                                        return images.map((image) => (
+                                            <div key={image.id} className="flex justify-center">
+                                                 <PolaroidCard
+                                                    caption={decade}
+                                                    aspectRatio={imageAspectRatio}
+                                                    status={image.status}
+                                                    imageUrl={image.url}
+                                                    error={image.error}
+                                                    onShake={handleRegenerateDecade}
+                                                    onDownload={handleDownloadIndividualImage}
+                                                    onClick={(url, caption) => setSelectedImage({ url, caption })}
+                                                    isMobile={isMobile}
+                                                />
+                                            </div>
+                                        ));
+                                    })}
                                 </div>
                         ) : (
                             <div ref={dragAreaRef} className="relative w-full max-w-5xl h-[600px] mt-4">
-                                {selectedDecades.map((decade, index) => {
-                                    const position = POSITIONS[index % POSITIONS.length];
-                                    const { top, left, rotate } = position;
-                                    return (
-                                        <motion.div
-                                            key={decade}
-                                            className="absolute cursor-grab active:cursor-grabbing"
-                                            style={{ top, left }}
-                                            initial={{ opacity: 0, scale: 0.5, y: 100, rotate: 0 }}
-                                            animate={{ 
-                                                opacity: 1, 
-                                                scale: 1, 
-                                                y: 0,
-                                                rotate: `${rotate}deg`,
-                                            }}
-                                            whileHover={{ 
-                                                zIndex: 50, 
-                                                scale: 1.05,
-                                                rotate: 0,
-                                                transition: { duration: 0.2 }
-                                            }}
-                                            transition={{ type: 'spring', stiffness: 100, damping: 20, delay: index * 0.15 }}
-                                        >
-                                            <PolaroidCard 
-                                                dragConstraintsRef={dragAreaRef}
-                                                caption={decade}
-                                                aspectRatio={imageAspectRatio}
-                                                status={generatedImages[decade]?.status || 'pending'}
-                                                imageUrl={generatedImages[decade]?.url}
-                                                error={generatedImages[decade]?.error}
-                                                onShake={handleRegenerateDecade}
-                                                onDownload={handleDownloadIndividualImage}
-                                                onClick={(url, caption) => setSelectedImage({ url, caption })}
-                                                isMobile={isMobile}
-                                            />
-                                        </motion.div>
-                                    );
+                                {selectedDecades.flatMap((decade, decadeIndex) => {
+                                    const images = generatedImages[decade] || [];
+                                    const position = POSITIONS[decadeIndex % POSITIONS.length];
+                                    
+                                    return images.map((image, versionIndex) => {
+                                        const { top, left, rotate } = position;
+                                        const offset = versionIndex * 15; // 15px offset for each version
+                                        
+                                        return (
+                                            <motion.div
+                                                key={image.id}
+                                                className="absolute cursor-grab active:cursor-grabbing"
+                                                style={{ 
+                                                    top: `calc(${top} + ${offset}px)`, 
+                                                    left: `calc(${left} + ${offset}px)` 
+                                                }}
+                                                initial={{ opacity: 0, scale: 0.5, y: 100, rotate: 0 }}
+                                                animate={{ 
+                                                    opacity: 1, 
+                                                    scale: 1, 
+                                                    y: 0,
+                                                    rotate: `${rotate}deg`,
+                                                }}
+                                                whileHover={{ 
+                                                    zIndex: 100, 
+                                                    scale: 1.05,
+                                                    rotate: 0,
+                                                    transition: { duration: 0.2 }
+                                                }}
+                                                transition={{ type: 'spring', stiffness: 100, damping: 20, delay: (decadeIndex * 0.15) + (versionIndex * 0.1) }}
+                                            >
+                                                <PolaroidCard 
+                                                    dragConstraintsRef={dragAreaRef}
+                                                    caption={decade}
+                                                    aspectRatio={imageAspectRatio}
+                                                    status={image.status}
+                                                    imageUrl={image.url}
+                                                    error={image.error}
+                                                    onShake={handleRegenerateDecade}
+                                                    onDownload={handleDownloadIndividualImage}
+                                                    onClick={(url, caption) => setSelectedImage({ url, caption })}
+                                                    isMobile={isMobile}
+                                                />
+                                            </motion.div>
+                                        );
+                                    });
                                 })}
                             </div>
                         )}
@@ -590,7 +652,7 @@ function App() {
                     imageUrl={selectedImage.url} 
                     title={selectedImage.caption}
                     onClose={() => setSelectedImage(null)} 
-                    onDownload={() => handleDownloadIndividualImage(selectedImage.caption)}
+                    onDownload={() => handleDownloadIndividualImage(selectedImage.caption, selectedImage.url)}
                     onRegenerate={selectedImage.caption !== 'Original' ? () => {
                         handleRegenerateDecade(selectedImage.caption);
                         setSelectedImage(null); // Close modal to show generation progress

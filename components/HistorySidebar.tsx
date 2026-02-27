@@ -9,7 +9,7 @@ export interface HistoryItem {
     originalImage: string;
     aspectRatio?: number;
     selectedDecades: string[];
-    generatedImages: Record<string, { status: string; url?: string; error?: string }>;
+    generatedImages: Record<string, { status: string; url?: string; error?: string; id: string }[]>;
     appState: 'image-uploaded' | 'generating' | 'results-shown';
 }
 
