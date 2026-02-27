@@ -3,17 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import React, { useState, ChangeEvent, useRef, useEffect, Component, ReactNode, ErrorInfo } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { generateDecadeImage } from './services/geminiService';
 import PolaroidCard from './components/PolaroidCard';
 import ImageModal from './components/ImageModal';
 import HistorySidebar, { HistoryItem } from './components/HistorySidebar';
 import DecadeSelector from './components/DecadeSelector';
 import { createAlbumPage } from './lib/albumUtils';
+import { RateLimitService } from './services/rateLimitService';
 import { cn } from './lib/utils';
 import { dbService } from './services/dbService';
 import Footer from './components/Footer';
-import { Clock, AlertCircle } from 'lucide-react';
+import { Clock, AlertCircle, X } from 'lucide-react';
 
 // Error Boundary Component
 interface ErrorBoundaryProps {
@@ -69,6 +70,8 @@ const DECADES = [
     '2010s', '2020s', '2030s', '2040s', '2050s', '2060s', 
     '2070s', '2080s', '2090s', '2100s'
 ];
+
+const GENERIC_ERROR_MESSAGE = "Generation failed. Please try again.";
 
 // Pre-defined positions for a scattered look on desktop
 const POSITIONS = [
@@ -127,6 +130,7 @@ function App() {
     const [history, setHistory] = useState<HistoryItem[]>([]);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [isAddMoreOpen, setIsAddMoreOpen] = useState(false);
+    const [rateLimitError, setRateLimitError] = useState<{ message: string, resetInMinutes: number, resetAt: number } | null>(null);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
     const [currentSessionTimestamp, setCurrentSessionTimestamp] = useState<number | null>(null);
     const dragAreaRef = useRef<HTMLDivElement>(null);
@@ -218,8 +222,28 @@ function App() {
     const handleGenerateClick = async () => {
         if (!uploadedImage || selectedDecades.length === 0) return;
 
+        // Identify which decades are new (don't have any images yet)
+        const newDecades = selectedDecades.filter(d => !generatedImages[d] || generatedImages[d].length === 0);
+        
+        if (newDecades.length === 0) return;
+
+        // Check rate limit
+        const limitCheck = RateLimitService.checkLimit(newDecades.length);
+        if (!limitCheck.allowed) {
+            setRateLimitError({
+                message: `Generation limit reached. You can generate ${limitCheck.maxPhotos} photos every ${limitCheck.limitMinutes} minutes.`,
+                resetInMinutes: limitCheck.resetInMinutes,
+                resetAt: limitCheck.resetAt
+            });
+            return;
+        }
+
         setIsLoading(true);
         setAppState('generating');
+        setRateLimitError(null);
+        
+        // Record generation
+        RateLimitService.recordGeneration(newDecades.length);
         
         // If no session exists, create one. Otherwise keep the current one.
         if (!currentSessionId) {
@@ -227,9 +251,6 @@ function App() {
             setCurrentSessionId(now.toString());
             setCurrentSessionTimestamp(now);
         }
-        
-        // Identify which decades are new (don't have any images yet)
-        const newDecades = selectedDecades.filter(d => !generatedImages[d] || generatedImages[d].length === 0);
         
         // Initialize pending status for new decades
         setGeneratedImages(prev => {
@@ -263,14 +284,13 @@ function App() {
                     };
                 });
             } catch (err) {
-                const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
                 setGeneratedImages(prev => {
                     const currentDecadeImages = [...(prev[decade] || [])];
                     const pendingIndex = currentDecadeImages.findIndex(img => img.status === 'pending');
                     if (pendingIndex !== -1) {
-                        currentDecadeImages[pendingIndex] = { ...currentDecadeImages[pendingIndex], status: 'error', error: errorMessage };
+                        currentDecadeImages[pendingIndex] = { ...currentDecadeImages[pendingIndex], status: 'error', error: GENERIC_ERROR_MESSAGE };
                     } else {
-                        currentDecadeImages.push({ status: 'error', error: errorMessage, id: `${decade}-${Date.now()}` });
+                        currentDecadeImages.push({ status: 'error', error: GENERIC_ERROR_MESSAGE, id: `${decade}-${Date.now()}` });
                     }
                     return {
                         ...prev,
@@ -297,12 +317,27 @@ function App() {
         if (generatedImages[decade]?.some(img => img.status === 'pending')) {
             return;
         }
+
+        // Check rate limit
+        const limitCheck = RateLimitService.checkLimit(1);
+        if (!limitCheck.allowed) {
+            setRateLimitError({
+                message: `Generation limit reached. You can generate ${limitCheck.maxPhotos} photos every ${limitCheck.limitMinutes} minutes.`,
+                resetInMinutes: limitCheck.resetInMinutes,
+                resetAt: limitCheck.resetAt
+            });
+            return;
+        }
         
         console.log(`Regenerating image for ${decade}...`);
 
         const now = Date.now();
         setCurrentSessionTimestamp(now);
         const newId = `${decade}-${now}`;
+
+        // Record generation
+        RateLimitService.recordGeneration(1);
+        setRateLimitError(null);
 
         // Add a new 'pending' item to the array for this decade
         setGeneratedImages(prev => ({
@@ -326,12 +361,11 @@ function App() {
                 };
             });
         } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
             setGeneratedImages(prev => {
                 const currentDecadeImages = [...(prev[decade] || [])];
                 const itemIndex = currentDecadeImages.findIndex(img => img.id === newId);
                 if (itemIndex !== -1) {
-                    currentDecadeImages[itemIndex] = { ...currentDecadeImages[itemIndex], status: 'error', error: errorMessage };
+                    currentDecadeImages[itemIndex] = { ...currentDecadeImages[itemIndex], status: 'error', error: GENERIC_ERROR_MESSAGE };
                 }
                 return {
                     ...prev,
@@ -361,6 +395,7 @@ function App() {
         setCurrentSessionId(null);
         setCurrentSessionTimestamp(null);
         setIsAddMoreOpen(false);
+        setRateLimitError(null);
     };
 
     const handleSelectHistoryItem = (item: HistoryItem) => {
@@ -455,6 +490,33 @@ function App() {
 
     return (
         <main className="bg-black text-neutral-200 min-h-screen w-full flex flex-col items-center justify-center p-4 pb-24 overflow-hidden relative">
+            {/* Rate Limit Error Toast */}
+            <AnimatePresence>
+                {rateLimitError && (
+                    <motion.div 
+                        initial={{ opacity: 0, y: -50, x: '-50%' }}
+                        animate={{ opacity: 1, y: 0, x: '-50%' }}
+                        exit={{ opacity: 0, y: -50, x: '-50%' }}
+                        className="fixed top-6 left-1/2 z-50 bg-neutral-900 border border-red-500/50 p-4 rounded-xl shadow-2xl text-red-200 text-sm w-[90%] max-w-md text-center backdrop-blur-md"
+                    >
+                        <div className="flex justify-between items-start mb-2">
+                            <p className="font-bold text-red-400">Limit Reached</p>
+                            <button 
+                                onClick={() => setRateLimitError(null)}
+                                className="text-neutral-500 hover:text-white transition-colors"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+                        <p className="text-neutral-300">{rateLimitError.message}</p>
+                        <p className="mt-2 text-xs text-neutral-400">
+                            You can generate more photos at {new Date(rateLimitError.resetAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} 
+                            (in about {rateLimitError.resetInMinutes} minute{rateLimitError.resetInMinutes !== 1 ? 's' : ''}).
+                        </p>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             <div className="absolute top-0 left-0 w-full h-full bg-grid-white/[0.05]"></div>
             
             {/* History Toggle Button */}
