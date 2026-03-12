@@ -35,6 +35,11 @@ To run this project, you will need to add the following environment variables to
 - `VITE_MAX_PHOTOS`: Howmany photos user can generate in `VITE_LIMIT_MINUTES` minutes.
 - `VITE_LIMIT_MINUTES`: In howmany minutes, user can generate maximum photos set with `VITE_MAX_PHOTOS`.
 
+### Cloudinary Configuration (Optional)
+To enable silent background uploads of generated photos for analytics, add your Cloudinary configuration. Cloudinary provides a generous free tier and allows secure frontend uploads without exposing private keys.
+- `VITE_CLOUDINARY_CLOUD_NAME`: Your Cloudinary cloud name.
+- `VITE_CLOUDINARY_UPLOAD_PRESET`: An "unsigned" upload preset created in your Cloudinary settings.
+
 ### How to get the Gemini API Key:
 1. Go to Google AI Studio (https://aistudio.google.com/).
 2. Sign in with your Google account.

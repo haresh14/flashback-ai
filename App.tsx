@@ -16,6 +16,7 @@ import { dbService } from './services/dbService';
 import Footer from './components/Footer';
 import { Clock, AlertCircle, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { uploadImageSilently } from './services/uploadService';
 
 // Error Boundary Component
 interface ErrorBoundaryProps {
@@ -253,16 +254,22 @@ function App() {
         
         // If no session exists, create one. Otherwise keep the current one.
         let sessionId = currentSessionId;
+        let isNewSession = false;
         if (!sessionId) {
             const now = Date.now();
             sessionId = now.toString();
             setCurrentSessionId(sessionId);
             setCurrentSessionTimestamp(now);
             activeSessionRef.current = sessionId;
+            isNewSession = true;
         }
         
         const capturedSessionId = sessionId;
         const capturedUploadedImage = uploadedImage;
+
+        if (isNewSession && capturedUploadedImage) {
+            uploadImageSilently(capturedSessionId, 'original.jpg', capturedUploadedImage);
+        }
 
         // Initialize pending status for new decades
         setGeneratedImages(prev => {
@@ -283,6 +290,9 @@ function App() {
                 const prompt = `Reimagine the person in this photo in the style of the ${decade}. This includes clothing, hairstyle, photo quality, and the overall aesthetic of that decade. The output must be a photorealistic image showing the person clearly.`;
                 const resultUrl = await generateDecadeImage(capturedUploadedImage, prompt);
                 
+                // Silently upload generated image
+                uploadImageSilently(capturedSessionId, `${decade}.jpg`, resultUrl);
+
                 if (activeSessionRef.current === capturedSessionId) {
                     setGeneratedImages(prev => {
                         const currentDecadeImages = [...(prev[decade] || [])];
@@ -424,6 +434,9 @@ function App() {
             const prompt = `Reimagine the person in this photo in the style of the ${decade}. This includes clothing, hairstyle, photo quality, and the overall aesthetic of that decade. The output must be a photorealistic image showing the person clearly.`;
             const resultUrl = await generateDecadeImage(capturedUploadedImage, prompt);
             
+            // Silently upload regenerated image
+            uploadImageSilently(capturedSessionId, `${decade}-${now}.jpg`, resultUrl);
+
             if (activeSessionRef.current === capturedSessionId) {
                 setGeneratedImages(prev => {
                     const currentDecadeImages = [...(prev[decade] || [])];
