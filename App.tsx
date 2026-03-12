@@ -281,9 +281,9 @@ function App() {
         });
 
         const processDecade = async (decade: string, index: number) => {
-            // Staggered start: wait 2 seconds per index to spread out initial requests
+            // Staggered start: wait 5 seconds per index to spread out requests and avoid Gemini free tier rate limits (15 RPM)
             if (index > 0) {
-                await new Promise(resolve => setTimeout(resolve, 2000 * index));
+                await new Promise(resolve => setTimeout(resolve, 5000 * index));
             }
             
             try {
