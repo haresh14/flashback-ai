@@ -4,7 +4,7 @@
 */
 import React, { useState, ChangeEvent, useRef, useEffect, Component, ReactNode, ErrorInfo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { generateDecadeImage } from './services/geminiService';
+import { generateDecadeImage } from './services/imageService';
 import PolaroidCard from './components/PolaroidCard';
 import ImageModal from './components/ImageModal';
 import HistorySidebar, { HistoryItem } from './components/HistorySidebar';

@@ -7,10 +7,6 @@ import type { GenerateContentResponse } from "@google/genai";
 
 const API_KEY = process.env.API_KEY;
 
-if (!API_KEY) {
-  throw new Error("API_KEY environment variable is not set");
-}
-
 // --- Helper Functions ---
 
 /**
@@ -105,6 +101,10 @@ async function callGeminiWithRetry(imagePart: object, textPart: object): Promise
  * @returns A promise that resolves to a base64-encoded image data URL of the generated image.
  */
 export async function generateDecadeImage(imageDataUrl: string, prompt: string): Promise<string> {
+  if (!API_KEY) {
+    throw new Error("GEMINI_API_KEY environment variable is not set. Add it to your .env file.");
+  }
+
   const match = imageDataUrl.match(/^data:(image\/\w+);base64,(.*)$/);
   if (!match) {
     throw new Error("Invalid image data URL format. Expected 'data:image/...;base64,...'");

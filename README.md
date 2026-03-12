@@ -31,7 +31,12 @@ Check out the live demo here: [https://flashback-ai.netlify.app](https://flashba
 ## Environment Variables
 To run this project, you will need to add the following environment variables to your `.env` file:
 
-- `GEMINI_API_KEY`: Your Google Gemini API key.
+### Image Generation Provider (choose one)
+- `IMAGE_PROVIDER`: Either `gemini` or `openai` (or `chatgpt`). Only one provider is used at a time. Defaults to `gemini` if not set.
+- `GEMINI_API_KEY`: Your Google Gemini API key. **Required when `IMAGE_PROVIDER` is `gemini`.**
+- `OPENAI_API_KEY`: Your OpenAI API key. **Required when `IMAGE_PROVIDER` is `openai`.**
+
+### Rate Limiting
 - `VITE_MAX_PHOTOS`: Howmany photos user can generate in `VITE_LIMIT_MINUTES` minutes.
 - `VITE_LIMIT_MINUTES`: In howmany minutes, user can generate maximum photos set with `VITE_MAX_PHOTOS`.
 
@@ -45,10 +50,35 @@ To enable silent background uploads of generated photos for analytics, add your 
 2. Sign in with your Google account.
 3. Click on "Get API key" in the left sidebar.
 4. Create a new API key or copy an existing one.
-5. Add it to your `.env` file like this:
+5. Add it to your `.env` file.
+
+### How to get the OpenAI API Key (for ChatGPT/OpenAI):
+The app uses **GPT Image 1.5** with `input_fidelity: high` to preserve face, pose, and aspect ratio while changing clothing and era aesthetic (not DALL-E 2).
+1. Go to OpenAI Platform (https://platform.openai.com/).
+2. Sign in or create an account.
+3. Navigate to API keys and create a new key.
+4. Add to your `.env` file and set `IMAGE_PROVIDER=openai`:
    ```env
-   GEMINI_API_KEY=your_api_key_here
+   IMAGE_PROVIDER=openai
+   OPENAI_API_KEY=your_openai_api_key_here
    ```
+
+### Example .env configurations
+**Using Gemini (default):**
+```env
+IMAGE_PROVIDER=gemini
+GEMINI_API_KEY=your_gemini_key_here
+VITE_MAX_PHOTOS=10
+VITE_LIMIT_MINUTES=60
+```
+
+**Using OpenAI (ChatGPT):**
+```env
+IMAGE_PROVIDER=openai
+OPENAI_API_KEY=your_openai_key_here
+VITE_MAX_PHOTOS=10
+VITE_LIMIT_MINUTES=60
+```
 
 ## How to deploy the project?
 This project is configured for easy deployment on Netlify.
@@ -61,7 +91,9 @@ This project is configured for easy deployment on Netlify.
 6. Netlify will automatically detect the build settings from the `netlify.toml` file:
    - Build command: `npm run build`
    - Publish directory: `dist`
-7. Click "Show advanced" and add your `GEMINI_API_KEY` environment variable.
+7. Click "Show advanced" and add your environment variables:
+   - For **Gemini**: `IMAGE_PROVIDER=gemini`, `GEMINI_API_KEY=your_key`
+   - For **OpenAI**: `IMAGE_PROVIDER=openai`, `OPENAI_API_KEY=your_key`
 8. Click "Deploy site".
 
 ## How to test the project?
